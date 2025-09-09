@@ -3,6 +3,8 @@ package headers
 import (
 	"bytes"
 	"fmt"
+	"maps"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +24,12 @@ func (h *Headers) Contains(key string) bool {
 	return h.headers[strings.ToLower(key)] != ""
 }
 
+func (h *Headers) Extend(headers Headers) {
+	for k := range maps.Keys(headers.GetHeaders()) {
+		h.Set(k, headers.Get(k))
+	}
+}
+
 func (h Headers) GetHeaders() map[string]string {
 	return h.headers
 }
@@ -30,6 +38,28 @@ func NewHeaders() *Headers {
 	return &Headers{
 		headers: map[string]string{},
 	}
+}
+
+func GetDefaultHeaders(contentLen int) Headers {
+	headers := NewHeaders()
+
+	headers.Set("Content-Length", strconv.Itoa(contentLen))
+	headers.Set("Connection", "close")
+	headers.Set("Content-Type", "text/plain")
+
+	return *headers
+}
+
+func (h Headers) ToString() string {
+	headersString := ""
+
+	for key, value := range h.headers {
+		headersString += fmt.Sprintf("%s: %s\r\n", key, value)
+	}
+
+	headersString += "\r\n"
+
+	return headersString
 }
 
 func isValidToken(key []byte) bool {

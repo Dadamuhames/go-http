@@ -29,6 +29,8 @@ func handleConnection(conn net.Conn) {
 		fmt.Printf("- %s: %s \n", key, value)
 	}
 
+	// fmt.Printf("Body: %s", string(req.Body))
+
 }
 
 func main() {

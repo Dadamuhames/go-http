@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go-http/internal/headers"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -13,7 +14,9 @@ type parserState int
 const (
 	StateInitialized    parserState = 0
 	StateParsingHeaders parserState = 1
-	StateDone           parserState = 2
+	StateParsingBody    parserState = 2
+	StateDone           parserState = 3
+	StateError          parserState = 4
 )
 
 type RequestLine struct {
@@ -23,21 +26,23 @@ type RequestLine struct {
 }
 
 type Request struct {
-	RequestLine RequestLine
-	Headers     headers.Headers
-	Body        []byte
-	state       parserState
+	RequestLine   RequestLine
+	Headers       headers.Headers
+	Body          []byte
+	state         parserState
+	contentLength int
 }
 
 func newRequest() *Request {
 	return &Request{
 		Headers: *headers.NewHeaders(),
 		state:   StateInitialized,
+		Body:    make([]byte, 0),
 	}
 }
 
 func (r *Request) done() bool {
-	return r.state == StateDone
+	return r.state == StateDone || r.state == StateError
 }
 
 func (r *Request) parse(data []byte) (int, error) {
@@ -79,8 +84,47 @@ outer:
 			read += readN
 
 			if done {
-				r.state = StateDone
+				if !r.Headers.Contains("Content-Length") {
+					r.state = StateDone
+					continue
+				}
+
+				contentLenStr := r.Headers.Get("Content-Length")
+				contentLength, err := strconv.Atoi(contentLenStr)
+
+				if contentLength == 0 {
+					r.state = StateDone
+					break
+				}
+
+				if err != nil {
+					r.state = StateError
+					return 0, fmt.Errorf("Malformed Content-Length header: %s", contentLenStr)
+				}
+
+				r.contentLength = contentLength
+				r.state = StateParsingBody
 			}
+
+		case StateParsingBody:
+			if len(currentData) == 0 {
+				if r.contentLength != len(r.Body) {
+					r.state = StateError
+					return 0, fmt.Errorf("Content-Length doesn't match actual body length")
+				}
+
+				r.state = StateDone
+				continue
+			}
+
+			r.Body = append(r.Body, currentData[len(r.Body):]...)
+
+			if r.contentLength == len(r.Body) {
+				r.state = StateDone
+				continue
+			}
+
+			break outer
 
 		case StateDone:
 			break outer
@@ -144,7 +188,13 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		bufIdx += n
 
-		readN, err := request.parse(buf[:bufIdx])
+		currentBuffer := make([]byte, 0)
+
+		if err != io.EOF {
+			currentBuffer = buf[:bufIdx]
+		}
+
+		readN, err := request.parse(currentBuffer)
 
 		if err != nil {
 			return nil, err
