@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"go-http/internal/headers"
 	"go-http/internal/request"
 	"go-http/internal/response"
@@ -11,7 +12,7 @@ import (
 	"syscall"
 )
 
-const port = 42069
+const defaultPort = 42069
 
 func badRequest() string {
 	return `<html>
@@ -38,7 +39,11 @@ func serverError() string {
 }
 
 func main() {
-	server, err := server.Serve(port, func(res response.ResponseWriter, req *request.Request) {
+	port := flag.Int("port", defaultPort, "port")
+
+	flag.Parse()
+
+	server, err := server.Serve(*port, func(res response.ResponseWriter, req *request.Request) {
 		switch req.RequestLine.RequestTarget {
 		case "/yourproblem":
 			hdrs := headers.NewHeaders()
