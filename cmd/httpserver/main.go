@@ -2,13 +2,16 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"go-http/internal/headers"
 	"go-http/internal/request"
 	"go-http/internal/response"
 	"go-http/internal/server"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -44,20 +47,37 @@ func main() {
 	flag.Parse()
 
 	server, err := server.Serve(*port, func(res response.ResponseWriter, req *request.Request) {
-		switch req.RequestLine.RequestTarget {
-		case "/yourproblem":
+		target := req.RequestLine.RequestTarget
+
+		switch {
+		case target == "/yourproblem":
 			hdrs := headers.NewHeaders()
 
 			hdrs.Set("Content-Type", "text/html")
 
 			res.Send(response.HTTP_STATUS_BAD_REQUEST, *hdrs, []byte(badRequest()))
 
-		case "/myproblem":
+		case target == "/myproblem":
 			hdrs := headers.NewHeaders()
 
 			hdrs.Set("Content-Type", "text/html")
 
 			res.Send(response.HTTP_STATUS_INTERNAL_SERVER_ERROR, *hdrs, []byte(serverError()))
+
+		case strings.HasPrefix(target, "/httpbin/stream/"):
+			num := strings.Replace(target, "/httpbin/stream/", "", 1)
+
+			resp, err := http.Get(fmt.Sprintf("https://httpbin.org/stream/%s", num))
+
+			if err != nil {
+				res.SendBodyWithDefaultHeaders(
+					response.HTTP_STATUS_INTERNAL_SERVER_ERROR,
+					[]byte("Internal server error"),
+				)
+				return
+			}
+
+			res.SendFromStream(response.HTTP_STATUS_OK, resp.Body)
 
 		default:
 			res.SendEmptyResponse(response.HTTP_STATUS_OK)

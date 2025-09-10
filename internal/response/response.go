@@ -73,8 +73,46 @@ func (w ResponseWriter) SendBodyWithDefaultHeaders(statusCode StatusCode, body [
 
 func (w ResponseWriter) SendEmptyResponse(statusCode StatusCode) {
 	w.SetStatusCode(statusCode)
-
 	w.writeAll()
+}
+
+func (w ResponseWriter) SendFromStream(
+	statusCode StatusCode,
+	reader io.ReadCloser) {
+
+	// write status line
+	w.SetStatusCode(statusCode)
+	w.writeStatusLine()
+
+	// write headers
+	w.headers.Delete("Content-Length")
+	w.headers.Set("Transfer-Encoding", "chunked")
+	w.headers.Set("Content-Type", "text/plain")
+	w.writeHeaders()
+
+	// write body
+	read := 0
+	data := make([]byte, 1024)
+
+	for {
+		n, err := reader.Read(data[read:])
+
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+
+		read += n
+
+		w.writeBodyFromByteArray([]byte(fmt.Sprintf("%x\r\n", n)))
+		w.writeBodyFromByteArray(data[:read])
+		w.writeBodyFromByteArray([]byte("\r\n"))
+
+		copy(data, data[n:read])
+		read -= n
+	}
+
+	w.writeBodyFromByteArray([]byte("0\r\n\r\n"))
 }
 
 func (w ResponseWriter) writeAll() {
@@ -130,4 +168,12 @@ func (w *ResponseWriter) writeBody() (int, error) {
 	w.state = WriteDone
 
 	return w.writer.Write(w.body)
+}
+
+func (w *ResponseWriter) writeBodyFromByteArray(body []byte) (int, error) {
+	if w.state != WriteBody {
+		return 0, fmt.Errorf("Invalid state to write body")
+	}
+
+	return w.writer.Write(body)
 }

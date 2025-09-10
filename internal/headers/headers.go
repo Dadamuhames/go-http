@@ -34,6 +34,10 @@ func (h Headers) GetHeaders() map[string]string {
 	return h.headers
 }
 
+func (h *Headers) Delete(key string) {
+	delete(h.headers, strings.ToLower(key))
+}
+
 func NewHeaders() *Headers {
 	return &Headers{
 		headers: map[string]string{},
