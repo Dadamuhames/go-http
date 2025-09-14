@@ -1,6 +1,7 @@
 package response
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"go-http/internal/headers"
 	"io"
@@ -21,6 +22,7 @@ const (
 	WriteStatusLine WriterState = 0
 	WriteHeaders    WriterState = 1
 	WriteBody       WriterState = 2
+	WriteTrailers   WriterState = 2
 	WriteDone       WriterState = 3
 )
 
@@ -30,6 +32,7 @@ type ResponseWriter struct {
 	headers    headers.Headers
 	body       []byte
 	state      WriterState
+	trailers   headers.Headers
 }
 
 func NewResponseWriter(writer io.Writer) *ResponseWriter {
@@ -88,31 +91,44 @@ func (w ResponseWriter) SendFromStream(
 	w.headers.Delete("Content-Length")
 	w.headers.Set("Transfer-Encoding", "chunked")
 	w.headers.Set("Content-Type", "text/plain")
+	w.headers.Set("Trailers", "X-Content-SHA256, X-Content-Length")
 	w.writeHeaders()
 
 	// write body
-	read := 0
 	data := make([]byte, 1024)
+	hasher := sha256.New()
+	contentLen := 0
 
 	for {
-		n, err := reader.Read(data[read:])
+		n, err := reader.Read(data)
 
 		if err != nil {
 			fmt.Println(err)
 			break
 		}
 
-		read += n
+		chunk := data[:n]
 
 		w.writeBodyFromByteArray([]byte(fmt.Sprintf("%x\r\n", n)))
-		w.writeBodyFromByteArray(data[:read])
+		w.writeBodyFromByteArray(chunk)
 		w.writeBodyFromByteArray([]byte("\r\n"))
 
-		copy(data, data[n:read])
-		read -= n
+		hasher.Write(chunk)
+		contentLen += n
 	}
 
 	w.writeBodyFromByteArray([]byte("0\r\n\r\n"))
+
+	trailers := headers.NewHeaders()
+
+	sum := hasher.Sum(nil)
+	trailers.Set("X-Content-SHA256", fmt.Sprintf("%x", sum))
+	trailers.Set("X-Content-Length", strconv.Itoa(contentLen))
+
+	w.state = WriteTrailers
+	w.trailers = *trailers
+
+	w.writeTrailers()
 }
 
 func (w ResponseWriter) writeAll() {
@@ -176,4 +192,24 @@ func (w *ResponseWriter) writeBodyFromByteArray(body []byte) (int, error) {
 	}
 
 	return w.writer.Write(body)
+}
+
+func (w *ResponseWriter) writeTrailers() error {
+	if w.state != WriteTrailers {
+		return fmt.Errorf("Invalid state to write trailers")
+	}
+
+	if len(w.trailers.GetHeaders()) == 0 {
+		w.state = WriteDone
+		return nil
+	}
+
+	trailerString := w.trailers.ToString()
+
+	_, err := w.writer.Write([]byte(trailerString))
+
+	w.state = WriteDone
+
+	return err
+
 }
